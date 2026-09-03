@@ -1,36 +1,32 @@
 import os
 import json
 import re
-import tempfile
-import numpy as np
-from PIL import Image
-import io
+import base64
+import requests
 import pandas as pd
 import streamlit as st
 from groq import Groq
-import easyocr
 from dotenv import load_dotenv
+from PIL import Image
+import io
 
 load_dotenv()
 
 # Load API Keys
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OCRSPACE_API_KEY = os.getenv("OCRSPACE_API_KEY") 
+
 if not GROQ_API_KEY:
     st.error("GROQ_API_KEY not set. Please set it as an environment variable.")
+    st.stop()
+if not OCRSPACE_API_KEY:
+    st.error("OCRSPACE_API_KEY not set. Please set it as an environment variable.")
     st.stop()
 
 # Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
 
-# Initialize EasyOCR (cached for performance)
-@st.cache_resource
-def load_reader():
-    return easyocr.Reader(['en'])
-
-reader = load_reader()
-
 # Helper functions
-# Default country for fallback
 DEFAULT_COUNTRY = "Malaysia"
 COUNTRY_CODE_MAP = {
     "malaysia": "60",
@@ -48,15 +44,53 @@ COUNTRY_CODE_MAP = {
     "south korea": "82",
 }
 
-def extract_text_from_image_bytes(image_bytes):
-    """Use EasyOCR to extract text from image bytes."""
-    image = Image.open(io.BytesIO(image_bytes))
-    image_np = np.array(image)
-    result = reader.readtext(image_np)
-    if not result:
-        return ""
-    lines = [item[1] for item in result]
-    return "\n".join(lines)
+def extract_text_from_image_bytes(image_bytes, filename="image.png"):
+    """
+    Use OCR.space API with file upload (multipart/form-data) to extract text.
+    """
+    # Determine MIME type from file extension
+    ext = filename.split('.')[-1].lower()
+    if ext in ['jpg', 'jpeg']:
+        mime_type = 'image/jpeg'
+    elif ext == 'png':
+        mime_type = 'image/png'
+    elif ext in ['bmp']:
+        mime_type = 'image/bmp'
+    elif ext in ['tiff', 'tif']:
+        mime_type = 'image/tiff'
+    else:
+        mime_type = 'image/png'  # fallback
+
+    files = {
+        'file': (filename, image_bytes, mime_type)
+    }
+    data = {
+        'apikey': OCRSPACE_API_KEY,
+        'language': 'eng',
+        'isOverlayRequired': False,
+        'detectOrientation': True,
+        'scale': True,
+    }
+    response = requests.post(
+        'https://api.ocr.space/parse/image',
+        files=files,
+        data=data,
+        timeout=30
+    )
+
+    if response.status_code != 200:
+        raise Exception(f"OCR.space API error (HTTP {response.status_code}): {response.text}")
+
+    result = response.json()
+    if result.get('OCRExitCode') != 1:
+        error_msg = result.get('ErrorMessage', 'Unknown error')
+        raise Exception(f"OCR.space error: {error_msg}")
+
+    parsed_text = ""
+    for parsed in result.get('ParsedResults', []):
+        parsed_text += parsed.get('ParsedText', '') + "\n"
+
+    return parsed_text.strip()
 
 def call_groq_extract(text):
     """Send OCR text to Groq and ask for structured JSON, including Country."""
@@ -134,7 +168,7 @@ def format_phone_number(number, country_code):
         valid = [n for n in number if n]
         if not valid:
             return None
-        number = valid[0]  # could join them with ", "
+        number = valid[0]  # or join them with ", " if you prefer
     # Ensure it's a string
     number = str(number)
     digits = re.sub(r'\D', '', number)
@@ -160,7 +194,7 @@ def compute_extensions(office_numbers):
     return suffix if suffix else None
 
 def validate_and_format(data):
-    # used to determine countery, will try from extracted "Country" field first
+    # Determine country: try from extracted "Country" field first
     country = data.get("Country")
     if not country:
         # Fallback to address inference
@@ -169,14 +203,14 @@ def validate_and_format(data):
     country_lower = country.lower() if country else DEFAULT_COUNTRY.lower()
     country_code = COUNTRY_CODE_MAP.get(country_lower)
     if not country_code:
-        # If not found, use default MSIA (60)
+        # If not found, use default Malaysia (60)
         country_code = COUNTRY_CODE_MAP.get(DEFAULT_COUNTRY.lower(), "60")
 
-    # Phone Number
+    # ---- Phone Number ----
     if data.get("Phone Number"):
         data["Phone Number"] = format_phone_number(data["Phone Number"], country_code)
 
-    # Office Number
+    # ---- Office Number ----
     office = data.get("Office Number")
     if office:
         if isinstance(office, str):
@@ -204,10 +238,10 @@ def process_image_bytes(image_bytes):
     data = validate_and_format(data)
     return data
 
-# Streamlit UI
+# ---------- Streamlit UI ----------
 st.set_page_config(page_title="Contact Card Extractor", layout="wide")
 st.title("📇 Contact Card Extractor")
-st.markdown("Upload business card images - we'll extract contact details using EasyOCR + Groq.")
+st.markdown("Upload business card images – we'll extract contact details using OCR.space + Groq.")
 
 uploaded_files = st.file_uploader(
     "Choose images (JPG, PNG, etc.)",

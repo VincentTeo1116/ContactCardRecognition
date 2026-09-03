@@ -1,7 +1,7 @@
 requests
 pandas
 streamlit
-easyocr
 Pillow
 numpy
 groq
+python-dotenv
