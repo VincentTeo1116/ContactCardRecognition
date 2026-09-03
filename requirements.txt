@@ -1,0 +1,1 @@
+os path glob json re base64 requests pandas google-generativeai streamlit easyocr Pillow numpy groq
