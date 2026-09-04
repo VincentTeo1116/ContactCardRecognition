@@ -206,6 +206,20 @@ def validate_and_format(data):
         # If not found, use default Malaysia (60)
         country_code = COUNTRY_CODE_MAP.get(DEFAULT_COUNTRY.lower(), "60")
 
+    # ---- Name ----
+    name = data.get("Name")
+    if name and isinstance(name, str):
+        data["Name"] = name.strip().title()
+    else:
+        data["Name"] = name 
+
+    # ---- Company Name ----
+    company = data.get("Company Name")
+    if company and isinstance(company, str):
+        data["Company Name"] = company.strip().title()
+    else:
+        data["Company Name"] = company
+
     # ---- Phone Number ----
     if data.get("Phone Number"):
         data["Phone Number"] = format_phone_number(data["Phone Number"], country_code)
@@ -241,7 +255,7 @@ def process_image_bytes(image_bytes):
 # ---------- Streamlit UI ----------
 st.set_page_config(page_title="Contact Card Extractor", layout="wide")
 st.title("📇 Contact Card Extractor")
-st.markdown("Upload business card images – we'll extract contact details using OCR.space + Groq.")
+st.markdown("Upload business card images - we'll extract contact details using OCR.space + Groq.")
 
 uploaded_files = st.file_uploader(
     "Choose images (JPG, PNG, etc.)",
